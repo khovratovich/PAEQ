@@ -1,3 +1,4 @@
+#include "crypto_aead.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -5,15 +6,8 @@
 #include "wmmintrin.h"
 #include <immintrin.h> 
 
-#include "crypto_aead.h"
-
-
 #define D_BYTES 2
 
- #define CRYPTO_KEYBYTES 16         //shall not exceed 20
-     #define CRYPTO_NSECBYTES 0
-     #define CRYPTO_NPUBBYTES 12    //shall not exceed 32
-     #define CRYPTO_ABYTES 16       //shall not exceed 64
 #define CRYPTO_MBLOCK (64-D_BYTES-CRYPTO_KEYBYTES)  //46 for 16-byte key
 #define CRYPTO_ADBLOCK (64-D_BYTES-2*CRYPTO_KEYBYTES) //30 for 16-byte key
 #define CRYPTO_COUNTERBYTES (64-D_BYTES-CRYPTO_KEYBYTES-CRYPTO_NPUBBYTES)  //34 for 16-byte key and 12-byte nonce
@@ -21,7 +15,7 @@
 
 #define AES_GROUP_ROUNDS 2
 #define AES_GROUPS 10
-//#define EXTRANONCE
+#define EXTRANONCE
 
   //This is the implementation of PPAE instantiated with AESQ permutation
 
@@ -262,11 +256,10 @@ int GenerateNonce(unsigned char* output, const unsigned char *m,unsigned long lo
 	unsigned long long message_index=0;
 	unsigned long long ad_index=0;
 	
-	for(unsigned i=0; (i<CRYPTO_KEYBYTES+2+2*CRYPTO_LENGTH)&&(mlen>0); ++i)//Filling buffer
+	for(unsigned i=0; (i<CRYPTO_KEYBYTES+2+2*CRYPTO_LENGTH); ++i)//Feeding buffer
 	{
 		State[state_index] ^= Buffer[i];
 		state_index++;
-		mlen--;
 		if(state_index==64-2*CRYPTO_KEYBYTES)//end of state
 		{
 			FPerm(State,StateOut);
@@ -275,7 +268,7 @@ int GenerateNonce(unsigned char* output, const unsigned char *m,unsigned long lo
 		}
 	}
 
-	while(mlen>0)//Filling plaintext
+	while(mlen>0)//Feeding plaintext
 	{
 		State[state_index] ^= m[message_index];
 		state_index++;
@@ -1055,8 +1048,8 @@ int crypto_aead_encrypt_no_nonce(
 		}
 
 		//3. Truncation
-		if(clen!=CRYPTO_ABYTES)//Should not happen if implementation is correct
-			return -6;
+		if(clen!=CRYPTO_ABYTES)//Incorrect tag length
+			return -1;
 
 		for(unsigned i=0; i<CRYPTO_ABYTES; ++i)
 		{
@@ -1249,9 +1242,3 @@ int genKAT(unsigned long long plaintext_length, unsigned long long ad_length)
 
 
 
-
-	 int main(int argc, char* argv[])
-{
-	genKAT(1,1);
-	   
-} 
