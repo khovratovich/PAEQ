@@ -871,7 +871,71 @@ int PAEQ128_opt_AESNI_decrypt( unsigned char *m, unsigned long long *mlen,
 	else return -1;
 }
 
+int AESQ_CTR(
+	unsigned char *c, unsigned long long *clen,
+	const unsigned char *m, unsigned long long mlen,
+	const unsigned char *npub,
+	const unsigned char *k
+	)
+{
+	__m128i BlockInput1[4];
+	__m128i BlockInput2[4];
+	__m128i BlockOutput1[4];
+	__m128i BlockOutput2[4];
+	__m128i plaintext1[4];
+	__m128i plaintext2[4];
+	__m128i ciphertext1[4];
+	__m128i ciphertext2[4];
 
+	__m128i one128 = _mm_set_epi64x(0, 1);
+	__m128i two128 = _mm_set_epi64x(0, 2);
+
+	memset(BlockInput1, 0, 64);
+	memset(BlockInput2, 0, 64);
+	memcpy(BlockInput1, npub, CRYPTO_NPUBBYTES);
+	memcpy(BlockInput2, npub, CRYPTO_NPUBBYTES);
+	memcpy(BlockInput1, k, CRYPTO_KEYBYTES);
+	memcpy(BlockInput2, k, CRYPTO_KEYBYTES);
+	BlockInput2[1] = _mm_add_epi64(BlockInput1[1], one128);
+
+	unsigned long encrypted_bytes = 0;
+	while (mlen >= 128)
+	{
+		DoubleFPermAsm(BlockInput1, BlockInput2, BlockOutput1, BlockOutput2);
+		BlockInput1[1] = _mm_add_epi64(BlockInput1[1], two128);
+		BlockInput2[1] = _mm_add_epi64(BlockInput2[1], two128);
+		plaintext1[0] = _mm_loadu_si128((__m128i*)(m + encrypted_bytes));
+		plaintext1[1] = _mm_loadu_si128((__m128i*)(m + encrypted_bytes+16));
+		plaintext1[2] = _mm_loadu_si128((__m128i*)(m + encrypted_bytes+32));
+		plaintext1[3] = _mm_loadu_si128((__m128i*)(m + encrypted_bytes+48));
+		plaintext2[0] = _mm_loadu_si128((__m128i*)(m + encrypted_bytes+64));
+		plaintext2[1] = _mm_loadu_si128((__m128i*)(m + encrypted_bytes + 80));
+		plaintext2[2] = _mm_loadu_si128((__m128i*)(m + encrypted_bytes + 96));
+		plaintext2[3] = _mm_loadu_si128((__m128i*)(m + encrypted_bytes + 112));
+		ciphertext1[0] = _mm_xor_si128(plaintext1[0], BlockOutput1[0]);
+		ciphertext1[1] = _mm_xor_si128(plaintext1[1], BlockOutput1[1]);
+		ciphertext1[2] = _mm_xor_si128(plaintext1[2], BlockOutput1[2]);
+		ciphertext1[3] = _mm_xor_si128(plaintext1[3], BlockOutput1[3]);
+		ciphertext2[0] = _mm_xor_si128(plaintext2[0], BlockOutput2[0]);
+		ciphertext2[1] = _mm_xor_si128(plaintext2[1], BlockOutput2[1]);
+		ciphertext2[2] = _mm_xor_si128(plaintext2[2], BlockOutput2[2]);
+		ciphertext2[3] = _mm_xor_si128(plaintext2[3], BlockOutput2[3]);
+		_mm_storeu_si128((__m128i*)(c + encrypted_bytes),ciphertext1[0]);
+		_mm_storeu_si128((__m128i*)(c + encrypted_bytes+16), ciphertext1[1]);
+		_mm_storeu_si128((__m128i*)(c + encrypted_bytes+32), ciphertext1[2]);
+		_mm_storeu_si128((__m128i*)(c + encrypted_bytes+48), ciphertext1[3]);
+		_mm_storeu_si128((__m128i*)(c + encrypted_bytes+64), ciphertext2[0]);
+		_mm_storeu_si128((__m128i*)(c + encrypted_bytes + 80), ciphertext2[1]);
+		_mm_storeu_si128((__m128i*)(c + encrypted_bytes + 96), ciphertext2[2]);
+		_mm_storeu_si128((__m128i*)(c + encrypted_bytes + 112), ciphertext2[3]);
+
+		mlen -= 128;
+		encrypted_bytes += 128;
+	}
+
+	return 0;
+
+}
 
 int PAEQ128_opt_AESNI_encrypt(
 	unsigned char *c, unsigned long long *clen,
@@ -1806,12 +1870,81 @@ int genKAT(unsigned long long plaintext_length, unsigned long long ad_length)
 	
 }
 
+void benchmark_ctr(unsigned long long plaintext_length)
+{
+	if ((plaintext_length >(1 << 31)))
+	return;
+		Init();   //For generating plaintext
+	unsigned char *key = (unsigned char*)malloc(CRYPTO_KEYBYTES);
+	unsigned char *nonce = (unsigned char*)malloc(CRYPTO_NPUBBYTES);
+
+	unsigned char *ciphertext;
+	unsigned long long ciphertext_length;
+
+	unsigned char *plaintext = (unsigned char*)malloc((size_t)plaintext_length);
+	unsigned char *plaintext_decrypted = (unsigned char*)malloc((size_t)plaintext_length);
+	plaintext_length = (size_t)plaintext_length;
+	if (plaintext == NULL || plaintext_decrypted == NULL)
+	return;
+
+	
+
+	//Plaintext initialization
+	unsigned char StateIn[64];
+	memset(StateIn, 0, 64);
+	unsigned char StateOut[64];
+	int counter = (int)plaintext_length;
+	unsigned char *dest_pointer = plaintext;
+	while (counter>0)
+	{
+		FPerm(StateIn, StateOut);
+		unsigned to_copy = (counter<64) ? counter : 64;
+		memcpy(dest_pointer, StateOut, to_copy);
+		dest_pointer += to_copy;
+		(*((unsigned*)StateIn))++;
+		counter -= to_copy;
+	}
+
+	
+	//Key setting
+	FPerm(StateIn, StateOut);
+	memcpy(key, StateOut, CRYPTO_KEYBYTES);
+	(*((unsigned*)StateIn))++;
+
+	//Nonce setting
+	FPerm(StateIn, StateOut);
+	memcpy(nonce, StateOut, CRYPTO_NPUBBYTES);
+	(*((unsigned*)StateIn))++;
+
+	//Ciphertext memory allocation
+	ciphertext = (unsigned char*)malloc((size_t)(plaintext_length + CRYPTO_ABYTES));
+	if (ciphertext == NULL)
+	{
+		free(plaintext);
+		free(plaintext_decrypted);
+		return;
+	}
+
+	uint64_t start_time, mid_time, end_time;
+	uint32_t start_ptr, mid_ptr, end_ptr;
+
+	start_time = __rdtscp(&start_ptr);
+	
+	AESQ_CTR(ciphertext, &ciphertext_length, plaintext, plaintext_length, nonce, key);
+	mid_time = __rdtscp(&mid_ptr);
+	float speed = (float)(mid_time - start_time) / (plaintext_length );
+	printf("AESQ-CTR-128: %d bytes encrypted, %2.2f cpb\n", (uint32_t)(plaintext_length), speed);
+	free(ciphertext);
+	free(plaintext_decrypted);
+	return;
+}
 
 int main(int argc, char* argv[])
 {
 	//genKAT(50,50);
 	for (unsigned i = 0; i < 10; ++i)
-		benchmark(1000000,0);
+		benchmark_ctr(1000000);
+		//benchmark(1000000,0);
 	return 0;
 }
 
