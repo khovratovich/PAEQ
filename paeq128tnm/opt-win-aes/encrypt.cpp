@@ -294,6 +294,227 @@ void Init()
 
 */
 
+int GenerateNonceOpt(unsigned char* output, const unsigned char *m, unsigned long long mlen,
+	const unsigned char *ad, unsigned long long adlen,
+	const unsigned char *k)
+	//Generate a nonce as a hash of the plaintext & AD by the AESQ-sponge function
+{
+	//Does not work for keys longer than 192 bits
+	if (CRYPTO_KEYBYTES >24)
+	{
+		memset(output, 0, CRYPTO_NPUBBYTES);
+		return -1;
+	}
+
+	__m128i State[4];  //sponge internal state
+	__m128i StateOut[4];  //sponge internal state
+	State[0] = State[1] = State[2] = State[3] = _mm_set_epi64x(0, 0);
+	
+	__m128i Injection[2]; //We inject into the first 32 bytes
+
+	//Plaintext length -- 12 bytes and AD length - 12 bytes
+	Injection[0] = _mm_set_epi64x(adlen<<32,mlen);
+	Injection[1] = _mm_set_epi64x(0, adlen >> 32);  
+	
+
+	//Key and nonce length
+	__m128i tmp = _mm_set_epi64x(CRYPTO_KEYBYTES + (CRYPTO_NPUBBYTES << 8), 0);
+	Injection[1] = _mm_xor_si128(Injection[1], tmp);
+
+	//Add key
+	__m128i key = _mm_loadu_si128((__m128i*)k);
+	Injection[1] = _mm_xor_si128(Injection[1], _mm_slli_si128(key, 10)); //10 key bytes left
+
+	//Iteration
+	State[0] = _mm_xor_si128(State[0], Injection[0]);
+	State[1] = _mm_xor_si128(State[1], Injection[1]);
+	FPermAsm(State, StateOut);
+
+
+	//Main loop
+	unsigned state_index = 0;
+	unsigned long long message_index = 0;
+	unsigned long long ad_index = 0;
+	unsigned char buf[32];
+
+	//Remaining key bytes
+	Injection[0] = _mm_srli_si128(key, CRYPTO_KEYBYTES - 10);
+	key = _mm_xor_si128(key, key);
+	state_index = CRYPTO_KEYBYTES - 10;
+
+	//Injecting plaintext
+	State[0] = _mm_xor_si128(StateOut[0], Injection[0]);
+
+	if (mlen + state_index < 16)//load only to the first register
+	{
+		memset(buf, 0, 32);
+		memcpy(buf,m,mlen);
+		Injection[0] = _mm_loadu_si128((__m128i*)buf);
+		Injection[0] = _mm_srli_si128(Injection[0], CRYPTO_KEYBYTES - 10);
+		state_index += mlen;
+	}
+	else if (mlen + state_index < 32)//load also to the second register
+	{
+		memset(buf, 0, 32);
+		memcpy(buf, m, mlen);
+		Injection[0] = _mm_loadu_si128((__m128i*)buf);
+		Injection[0] = _mm_srli_si128(Injection[0], CRYPTO_KEYBYTES - 10);
+		Injection[1] = _mm_loadu_si128((__m128i*)(buf+16));
+		state_index += mlen;
+	}
+	else
+	{
+		memset(buf, 0, 32);
+		memcpy(buf, m, 32);
+		Injection[0] = _mm_loadu_si128((__m128i*)buf);
+		Injection[0] = _mm_srli_si128(Injection[0], CRYPTO_KEYBYTES - 10);
+		Injection[1] = _mm_loadu_si128((__m128i*)(buf + 16));
+		State[0] = _mm_xor_si128(State[0], Injection[0]);
+		State[1] = _mm_xor_si128(StateOut[1], Injection[1]);
+		State[2] = StateOut[2];
+		State[3] = StateOut[3];
+		FPermAsm(State, StateOut);
+		message_index += 32 - state_index;
+		state_index = 0;
+		
+		while (mlen - message_index >= 32)
+		{
+			Injection[0] = _mm_loadu_si128((__m128i*)(m+message_index));
+			Injection[1] = _mm_loadu_si128((__m128i*)(m + message_index+16));
+			State[0] = _mm_xor_si128(StateOut[0], Injection[0]);
+			State[1] = _mm_xor_si128(StateOut[1], Injection[1]);
+			State[2] = StateOut[2];
+			State[3] = StateOut[3];
+			FPermAsm(State, StateOut);
+			message_index += 32 - state_index;
+			state_index = 0;
+		}
+		if (mlen - message_index< 16)//load only to the first register
+		{
+			memset(buf, 0, 32);
+			memcpy(buf, m+message_index, mlen-message_index);
+			Injection[0] = _mm_loadu_si128((__m128i*)buf);
+			state_index += mlen-message_index;
+		}
+		else if (mlen + state_index < 32)//load also to the second register
+		{
+			memset(buf, 0, 32);
+			memcpy(buf, m + message_index, mlen - message_index);
+			Injection[0] = _mm_loadu_si128((__m128i*)buf);
+			Injection[1] = _mm_loadu_si128((__m128i*)(buf + 16));
+			state_index += mlen - message_index;
+		}
+		else return -1;
+	}//end of plaintext loading
+	
+	
+
+	
+	return 0;
+
+}
+
+
+int GenerateNonceRef(unsigned char* output, const unsigned char *m, unsigned long long mlen,
+	const unsigned char *ad, unsigned long long adlen,
+	const unsigned char *k)
+	//Generate a nonce as a hash of the plaintext & AD by the AESQ-sponge function
+{
+	//Does not work for keys longer than 192 bits
+	if (CRYPTO_KEYBYTES >24)
+	{
+		memset(output, 0, CRYPTO_NPUBBYTES);
+		return -1;
+	}
+
+	unsigned char State[64];
+	unsigned char Buffer[CRYPTO_KEYBYTES + 2 + 2 * CRYPTO_LENGTH];
+	unsigned char StateOut[64];
+	memset(State, 0, 64);
+
+	//Plaintext length
+	for (unsigned i = 0; i<CRYPTO_LENGTH; ++i)
+		Buffer[i] = (i<sizeof(mlen)) ? (mlen >> (8 * i)) & 0xff : 0;
+
+	//Associated data length
+	for (unsigned i = 0; i<CRYPTO_LENGTH; ++i)
+		Buffer[i + CRYPTO_LENGTH] = (i<sizeof(adlen)) ? (adlen >> (8 * i)) & 0xff : 0;
+
+	//Key length
+	Buffer[2 * CRYPTO_LENGTH] = CRYPTO_KEYBYTES;
+
+	//Nonce length
+	Buffer[2 * CRYPTO_LENGTH + 1] = CRYPTO_NPUBBYTES;
+
+	//Add key 
+	for (unsigned i = 0; i<CRYPTO_KEYBYTES; ++i)
+		Buffer[i + CRYPTO_LENGTH * 2 + 2] = k[i];
+
+	unsigned state_index = 0;
+	unsigned long long message_index = 0;
+	unsigned long long ad_index = 0;
+
+	for (unsigned i = 0; (i<CRYPTO_KEYBYTES + 2 + 2 * CRYPTO_LENGTH); ++i)//Feeding buffer
+	{
+		State[state_index] ^= Buffer[i];
+		state_index++;
+		if (state_index == 64 - 2 * CRYPTO_KEYBYTES)//end of state
+		{
+			FPerm(State, StateOut);
+			state_index = 0;
+			for (unsigned j = 0; j<64; ++j) State[j] = StateOut[j];
+		}
+	}
+
+	while (mlen>0)//Feeding plaintext
+	{
+		State[state_index] ^= m[message_index];
+		state_index++;
+		message_index++;
+		mlen--;
+		if (state_index == 64 - 2 * CRYPTO_KEYBYTES)//end of state
+		{
+			FPerm(State, StateOut);
+			state_index = 0;
+			for (unsigned j = 0; j<64; ++j) State[j] = StateOut[j];
+		}
+	}
+	while (adlen>0) //Filling AD
+	{
+		State[state_index] ^= ad[ad_index];
+		state_index++;
+		ad_index++;
+		adlen--;
+		if (state_index == 64 - 2 * CRYPTO_KEYBYTES)//end of state
+		{
+			FPerm(State, StateOut);
+			state_index = 0;
+			for (unsigned j = 0; j<64; ++j) State[j] = StateOut[j];
+		}
+	}
+	//end of data
+	//Padding 10*1
+	State[state_index] ^= 1;
+	if (state_index == 64 - 2 * CRYPTO_KEYBYTES)//end of state
+	{
+		FPerm(State, StateOut);
+		state_index = 0;
+		for (unsigned j = 0; j<64; ++j) State[j] = StateOut[j];
+	}
+	while (state_index <63 - 2 * CRYPTO_KEYBYTES)
+	{
+		State[state_index] ^= 0;
+		state_index++;
+	}
+	State[state_index] ^= 1;//state_index must be =63 - 2*CRYPTO_KEYBYTES
+	FPerm(State, StateOut);
+	for (unsigned j = 0; j<CRYPTO_NPUBBYTES; ++j)
+		output[j] = StateOut[j];
+
+	return 0;
+
+}
+
 
 int PAEQ128_opt_AESNI_decrypt(unsigned char *m, unsigned long long *mlen,
 	const unsigned char *c, unsigned long long clen,
@@ -672,6 +893,71 @@ int PAEQ128_opt_AESNI_decrypt(unsigned char *m, unsigned long long *mlen,
 	else return -1;
 }
 
+int AESQ_CTR(
+	unsigned char *c, unsigned long long *clen,
+	const unsigned char *m, unsigned long long mlen,
+	const unsigned char *npub,
+	const unsigned char *k
+	)
+{
+	__m128i BlockInput1[4];
+	__m128i BlockInput2[4];
+	__m128i BlockOutput1[4];
+	__m128i BlockOutput2[4];
+	__m128i plaintext1[4];
+	__m128i plaintext2[4];
+	__m128i ciphertext1[4];
+	__m128i ciphertext2[4];
+
+	__m128i one128 = _mm_set_epi64x(0, 1);
+	__m128i two128 = _mm_set_epi64x(0, 2);
+
+	memset(BlockInput1, 0, 64);
+	memset(BlockInput2, 0, 64);
+	memcpy(BlockInput1, npub, CRYPTO_NPUBBYTES);
+	memcpy(BlockInput2, npub, CRYPTO_NPUBBYTES);
+	memcpy(BlockInput1, k, CRYPTO_KEYBYTES);
+	memcpy(BlockInput2, k, CRYPTO_KEYBYTES);
+	BlockInput2[1] = _mm_add_epi64(BlockInput1[1], one128);
+
+	unsigned long encrypted_bytes = 0;
+	while (mlen >= 128)
+	{
+		DoubleFPermAsm(BlockInput1, BlockInput2, BlockOutput1, BlockOutput2);
+		BlockInput1[1] = _mm_add_epi64(BlockInput1[1], two128);
+		BlockInput2[1] = _mm_add_epi64(BlockInput2[1], two128);
+		plaintext1[0] = _mm_loadu_si128((__m128i*)(m + encrypted_bytes));
+		plaintext1[1] = _mm_loadu_si128((__m128i*)(m + encrypted_bytes + 16));
+		plaintext1[2] = _mm_loadu_si128((__m128i*)(m + encrypted_bytes + 32));
+		plaintext1[3] = _mm_loadu_si128((__m128i*)(m + encrypted_bytes + 48));
+		plaintext2[0] = _mm_loadu_si128((__m128i*)(m + encrypted_bytes + 64));
+		plaintext2[1] = _mm_loadu_si128((__m128i*)(m + encrypted_bytes + 80));
+		plaintext2[2] = _mm_loadu_si128((__m128i*)(m + encrypted_bytes + 96));
+		plaintext2[3] = _mm_loadu_si128((__m128i*)(m + encrypted_bytes + 112));
+		ciphertext1[0] = _mm_xor_si128(plaintext1[0], BlockOutput1[0]);
+		ciphertext1[1] = _mm_xor_si128(plaintext1[1], BlockOutput1[1]);
+		ciphertext1[2] = _mm_xor_si128(plaintext1[2], BlockOutput1[2]);
+		ciphertext1[3] = _mm_xor_si128(plaintext1[3], BlockOutput1[3]);
+		ciphertext2[0] = _mm_xor_si128(plaintext2[0], BlockOutput2[0]);
+		ciphertext2[1] = _mm_xor_si128(plaintext2[1], BlockOutput2[1]);
+		ciphertext2[2] = _mm_xor_si128(plaintext2[2], BlockOutput2[2]);
+		ciphertext2[3] = _mm_xor_si128(plaintext2[3], BlockOutput2[3]);
+		_mm_storeu_si128((__m128i*)(c + encrypted_bytes), ciphertext1[0]);
+		_mm_storeu_si128((__m128i*)(c + encrypted_bytes + 16), ciphertext1[1]);
+		_mm_storeu_si128((__m128i*)(c + encrypted_bytes + 32), ciphertext1[2]);
+		_mm_storeu_si128((__m128i*)(c + encrypted_bytes + 48), ciphertext1[3]);
+		_mm_storeu_si128((__m128i*)(c + encrypted_bytes + 64), ciphertext2[0]);
+		_mm_storeu_si128((__m128i*)(c + encrypted_bytes + 80), ciphertext2[1]);
+		_mm_storeu_si128((__m128i*)(c + encrypted_bytes + 96), ciphertext2[2]);
+		_mm_storeu_si128((__m128i*)(c + encrypted_bytes + 112), ciphertext2[3]);
+
+		mlen -= 128;
+		encrypted_bytes += 128;
+	}
+
+	return 0;
+
+}
 
 int PAEQ128_opt_AESNI_encrypt(
 	unsigned char *c, unsigned long long *clen,
@@ -1066,6 +1352,269 @@ int crypto_aead_encrypt(
 	return PAEQ128_opt_AESNI_encrypt(c, clen, m, mlen, ad, adlen, npub, k);
 }
 
+int crypto_aead_encrypt_no_nonce(
+	unsigned char *c, unsigned long long *clen,
+	const unsigned char *m, unsigned long long mlen,
+	const unsigned char *ad, unsigned long long adlen,
+	const unsigned char *nsec,
+	unsigned char *npub,
+	const unsigned char *k
+	)
+	//Generates nonce out of plaintext and AD and put it into npub
+
+{
+	GenerateNonceOpt(npub, m, mlen, ad, adlen, k);
+	return PAEQ128_opt_AESNI_encrypt(c, clen, m, mlen, ad, adlen, npub, k);
+}
+
+int crypto_aead_encrypt_no_nonce_old(
+	unsigned char *c, unsigned long long *clen,
+	const unsigned char *m, unsigned long long mlen,
+	const unsigned char *ad, unsigned long long adlen,
+	const unsigned char *nsec,
+	unsigned char *npub,
+	const unsigned char *k
+	)
+{
+	Init();//Initializing GF(256) multiplication table for AES
+
+	if (clen == NULL)
+		return -1;
+	if ((mlen == 0) && (adlen == 0))
+	{
+		*clen = 0;
+		return 0;
+	}
+
+	//Assume that we do encryption and/or authentication so we need a key and a ciphertext pointer valid
+	if ((k == NULL) || (c == NULL))
+		return -2;
+
+	GenerateNonceOpt(npub, m, mlen, ad, adlen, k);
+
+	//Initializing constants
+	unsigned char D0[2];
+	D0[0] = CRYPTO_NPUBBYTES * 8; //nonce length in bits, zero for 256-bit nonce
+	D0[1] = CRYPTO_KEYBYTES * 8; //key length in bits
+	(*clen) = 0;
+
+	//Block variables
+	unsigned char BlockInput[64];  //V1 - input to the first layer call of F
+	unsigned char BlockMiddle[64];  //W1 - output of the first layer call of F
+	unsigned char BlockOutput[64];  //Y1 - output of the second layer call of F
+
+	unsigned char BlockLastInput[64];  //Z1 - input to the last call of F
+	memset(BlockLastInput, 0, 64);
+	unsigned char Tag[64]; //Tag output
+
+	unsigned long long encrypted_bytes = 0;//Encrypted bytes counter
+
+
+	//Encryption part
+	if (mlen != 0)
+	{
+		if (m == NULL)
+		{
+			//Clearing variables
+			for (unsigned i = 0; i<64; ++i)
+				BlockInput[i] = BlockMiddle[i] = BlockOutput[i] = BlockLastInput[i] = 0;
+			return -3;
+		}
+
+		unsigned long long mblock_counter = 1;   //Message block counter
+
+		while ((mlen>0))
+		{
+			/* I. First layer */
+
+			//1. Domain-separation constant
+			BlockInput[1] = D0[1];
+			if (mlen >= CRYPTO_MBLOCK)
+				BlockInput[0] = D0[0];
+			else //Last incomplete block
+				BlockInput[0] = D0[0] + 1;
+
+			//2. Counter
+			for (unsigned i = 0; i<CRYPTO_COUNTERBYTES; ++i)
+			{
+				BlockInput[i + 2] = (i<sizeof(mblock_counter)) ? (mblock_counter >> (8 * i)) & 0xff : 0;//copying counter bytewise
+			}
+
+			//3. Nonce
+			for (unsigned i = 0; i<CRYPTO_NPUBBYTES; ++i)
+			{
+				BlockInput[i + 2 + CRYPTO_COUNTERBYTES] = npub[i];
+			}
+
+			//4. Key
+			for (unsigned i = 0; i<CRYPTO_KEYBYTES; ++i)
+			{
+				BlockInput[i + 2 + CRYPTO_COUNTERBYTES + CRYPTO_NPUBBYTES] = k[i];
+			}
+
+			//5. Permutation call
+			FPerm(BlockInput, BlockMiddle); //First layer call to F
+
+			/* II. Encryption*/
+
+			if (mlen >= CRYPTO_MBLOCK)//Full block encryption
+			{
+				for (unsigned i = 0; i<CRYPTO_MBLOCK; ++i)
+				{
+					BlockMiddle[i + 2] ^= m[encrypted_bytes + i];
+					c[encrypted_bytes + i] = BlockMiddle[i + 2];
+
+				}
+				BlockMiddle[1] = D0[1];
+				BlockMiddle[0] = D0[0] + 2;  //New Di constant
+
+			}
+
+			else //Last incomplete block
+			{
+				for (unsigned i = 0; i<(unsigned)mlen; ++i)//Incomplete block Encryption
+				{
+					BlockMiddle[i + 2] ^= m[encrypted_bytes + i];
+					c[encrypted_bytes + i] = BlockMiddle[i + 2];
+				}
+				for (unsigned i = (unsigned)mlen; i<CRYPTO_MBLOCK; ++i)
+				{
+					BlockMiddle[i + 2] ^= (unsigned char)mlen;  //Extra Padding: extra bytes filled with the last block length in bytes
+				}
+
+				BlockMiddle[1] = D0[1];
+				BlockMiddle[0] = D0[0] + 3;  //New Di constant
+			}
+
+			//III. Second permutation call
+			//1. Call
+			FPerm(BlockMiddle, BlockOutput); //Second layer call to F
+
+			//2. Buffer update
+			for (unsigned i = 0; i<64 - 2 - CRYPTO_KEYBYTES; ++i)//Adding the output to tag preparation buffer
+			{
+				BlockLastInput[i + 2] ^= BlockOutput[i + 2];
+			}
+
+
+			//Counters increment
+			mblock_counter++;
+			if (mlen >= CRYPTO_MBLOCK)
+			{
+				encrypted_bytes += CRYPTO_MBLOCK;
+				mlen -= CRYPTO_MBLOCK;
+			}
+			else
+			{
+				encrypted_bytes += mlen;
+				mlen = 0;
+			}
+			(*clen) = encrypted_bytes;
+		}
+	}
+
+	//Associated data part	  
+	if (adlen != 0)
+	{
+		if (ad == NULL)
+		{
+			//Clearing variables
+			for (unsigned i = 0; i<64; ++i)
+				BlockInput[i] = BlockMiddle[i] = BlockOutput[i] = BlockLastInput[i] = 0;
+			return -4;
+		}
+
+		unsigned long long adblock_counter = 1;   //AD block counter
+		unsigned long long auth_bytes = 0;
+
+		while (adlen>0)
+		{
+			//1. Constant
+			BlockInput[1] = D0[1];
+			if (adlen >= CRYPTO_ADBLOCK)
+				BlockInput[0] = D0[0] + 4;
+			else //Last incomplete block
+				BlockInput[0] = D0[0] + 5;
+
+
+			//2. Counter
+			for (unsigned i = 0; i<CRYPTO_KEYBYTES; ++i)
+				BlockInput[i + 2] = (i<sizeof(adblock_counter)) ? (adblock_counter >> (8 * i)) & 0xff : 0;//copying counter bytewise
+
+			//3. AD block
+			if (adlen >= CRYPTO_ADBLOCK) //Filling AD block
+			{
+				for (unsigned i = 0; i<CRYPTO_ADBLOCK; ++i)
+					BlockInput[i + 2 + CRYPTO_KEYBYTES] = ad[auth_bytes + i];
+
+			}
+			else //Last incomplete block
+			{
+				for (unsigned i = 0; i<adlen; ++i)
+					BlockInput[i + 2 + CRYPTO_KEYBYTES] = ad[auth_bytes + i];
+				for (unsigned i = (unsigned)adlen; i<CRYPTO_ADBLOCK; ++i)
+					BlockInput[i + 2 + CRYPTO_KEYBYTES] = (unsigned char)adlen;
+			}
+
+			//4. Key
+			for (unsigned i = 0; i<CRYPTO_KEYBYTES; ++i)
+			{
+				BlockInput[i + CRYPTO_ADBLOCK + CRYPTO_KEYBYTES + 2] = k[i];
+			}
+
+
+			//5.Call to the F permutation
+
+			FPerm(BlockInput, BlockOutput);//Call to the F permutation
+
+			for (unsigned i = 0; i<64 - 2 - CRYPTO_KEYBYTES; ++i)//Adding the output to Z
+			{
+				BlockLastInput[i + 2] ^= BlockOutput[i];
+			}
+
+			//Counters increment
+			adblock_counter++;
+			if (adlen >= CRYPTO_ADBLOCK)
+			{
+				auth_bytes += CRYPTO_ADBLOCK;
+				adlen -= CRYPTO_ADBLOCK;
+			}
+			else
+			{
+				auth_bytes += adlen;
+				adlen = 0;
+			}
+		}
+	}
+
+	// Tag production 
+	for (unsigned i = 0; i<CRYPTO_KEYBYTES; ++i) //Key to the Z input
+		BlockLastInput[64 - CRYPTO_KEYBYTES + i] = k[i];
+	BlockLastInput[0] = D0[0] + 6;
+	BlockLastInput[1] = D0[1];
+
+	//1. Permutation call
+	FPerm(BlockLastInput, Tag);
+	//2. Key injection
+	for (unsigned i = 0; i<CRYPTO_KEYBYTES; ++i)
+	{
+		Tag[64 - CRYPTO_KEYBYTES + i] ^= k[i];
+	}
+
+	//3. Truncation
+	for (unsigned i = 0; i<CRYPTO_ABYTES; ++i)
+		c[(*clen) + i] = Tag[i];
+	*clen += CRYPTO_ABYTES;
+
+
+	//Clearing variables
+	for (unsigned i = 0; i<64; ++i)
+		BlockInput[i] = BlockMiddle[i] = BlockOutput[i] = BlockLastInput[i] = 0;
+
+
+
+	return 0;
+}
 
 
 int crypto_aead_decrypt(
