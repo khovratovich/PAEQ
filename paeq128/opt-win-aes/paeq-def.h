@@ -20,3 +20,6 @@ const unsigned char *npub,
 const unsigned char *k
 );
 
+extern  int key_bytes;
+extern  int nonce_bytes;
+extern  int tag_bytes;

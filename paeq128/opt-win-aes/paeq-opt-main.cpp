@@ -3,7 +3,6 @@
 #ifndef NO_SUPERCOP
 #include "crypto_aead.h"
 #endif
-#include "api.h"
 
 #include <stdio.h>
 #include "stdint.h"
@@ -24,8 +23,8 @@ int genKAT(unsigned long long plaintext_length, unsigned long long ad_length)
 	if ((plaintext_length > (1 << 31)) || (ad_length> (1 << 31)))
 		return 1;
 	Init();   //For generating plaintext
-	unsigned char *key = (unsigned char*)malloc(CRYPTO_KEYBYTES);
-	unsigned char *nonce = (unsigned char*)malloc(CRYPTO_NPUBBYTES);
+	unsigned char *key = (unsigned char*)malloc(key_bytes);
+	unsigned char *nonce = (unsigned char*)malloc(nonce_bytes);
 
 	unsigned char *ciphertext;
 	unsigned long long ciphertext_length;
@@ -40,8 +39,12 @@ int genKAT(unsigned long long plaintext_length, unsigned long long ad_length)
 	unsigned char *associated_data = (unsigned char*)malloc((size_t)ad_length);
 	if (associated_data == NULL)
 	{
-		free(plaintext);
-		free(plaintext_decrypted);
+		if (plaintext_length != 0)
+		{
+
+			free(plaintext);
+			free(plaintext_decrypted);
+		}
 		return 1;
 	}
 
@@ -77,21 +80,25 @@ int genKAT(unsigned long long plaintext_length, unsigned long long ad_length)
 
 	//Key setting
 	FPerm(StateIn, StateOut);
-	memcpy(key, StateOut, CRYPTO_KEYBYTES);
+	memcpy(key, StateOut, key_bytes);
 	(*((unsigned*)StateIn))++;
 
 	//Nonce setting
 	FPerm(StateIn, StateOut);
-	memcpy(nonce, StateOut, CRYPTO_NPUBBYTES);
+	memcpy(nonce, StateOut, nonce_bytes);
 	(*((unsigned*)StateIn))++;
 
 	//Ciphertext memory allocation
-	ciphertext = (unsigned char*)malloc((size_t)(plaintext_length + CRYPTO_ABYTES));
+	ciphertext = (unsigned char*)malloc((size_t)(plaintext_length + tag_bytes));
 	if (ciphertext == NULL)
 	{
-		free(plaintext);
-		free(plaintext_decrypted);
-		free(associated_data);
+		if (plaintext_length != 0)
+		{
+			free(plaintext);
+			free(plaintext_decrypted);
+		}
+		if (ad_length != 0)
+			free(associated_data);
 		return 1;
 	}
 
@@ -116,8 +123,8 @@ int genKAT(unsigned long long plaintext_length, unsigned long long ad_length)
 			fprintf(fp, "\n");
 	}
 	fprintf(fp, "\n");
-	fprintf(fp, "\nKEY  (%d bytes):\n", CRYPTO_KEYBYTES);
-	for (unsigned i = 0; i<CRYPTO_KEYBYTES; ++i)
+	fprintf(fp, "\nKEY  (%d bytes):\n", key_bytes);
+	for (unsigned i = 0; i<key_bytes; ++i)
 		fprintf(fp, "0x%.02x ", key[i]);
 	fprintf(fp, "\n");
 
@@ -138,8 +145,8 @@ int genKAT(unsigned long long plaintext_length, unsigned long long ad_length)
 		printf("Plaintext length mismatch\n");
 
 	//Writing outputs
-	fprintf(fp, "\nNONCE  (%d bytes):\n", CRYPTO_NPUBBYTES);
-	for (unsigned i = 0; i<CRYPTO_NPUBBYTES; ++i)
+	fprintf(fp, "\nNONCE  (%d bytes):\n", nonce_bytes);
+	for (unsigned i = 0; i<nonce_bytes; ++i)
 		fprintf(fp, "0x%.02x ", nonce[i]);
 	fprintf(fp, ".\n");
 	printf("Decryption result: %d\n", result);
@@ -151,7 +158,7 @@ int genKAT(unsigned long long plaintext_length, unsigned long long ad_length)
 		fprintf(fp, "0x%.02x ", ciphertext[i]);
 		if (i % 20 == 19)
 			fprintf(fp, "\n");
-		if (i == ciphertext_length - CRYPTO_ABYTES - 1)
+		if (i == ciphertext_length - tag_bytes - 1)
 			fprintf(fp, " || ");
 	}
 	fprintf(fp, ".\n");
@@ -167,10 +174,14 @@ int genKAT(unsigned long long plaintext_length, unsigned long long ad_length)
 	fclose(fp);
 
 
-	free(plaintext);
 	free(ciphertext);
-	free(plaintext_decrypted);
-	free(associated_data);
+	if (plaintext_length != 0)
+	{
+		free(plaintext);
+		free(plaintext_decrypted);
+	}
+	if (ad_length != 0)
+		free(associated_data);
 	return 0;
 
 
@@ -183,8 +194,8 @@ int benchmark(unsigned long long plaintext_length, unsigned long long ad_length)
 	if ((plaintext_length >(1 << 31)) || (ad_length> (1 << 31)))
 		return 1;
 	Init();   //For generating plaintext
-	unsigned char *key = (unsigned char*)malloc(CRYPTO_KEYBYTES);
-	unsigned char *nonce = (unsigned char*)malloc(CRYPTO_NPUBBYTES);
+	unsigned char *key = (unsigned char*)malloc(key_bytes);
+	unsigned char *nonce = (unsigned char*)malloc(nonce_bytes);
 
 	unsigned char *ciphertext;
 	unsigned long long ciphertext_length;
@@ -236,16 +247,16 @@ int benchmark(unsigned long long plaintext_length, unsigned long long ad_length)
 
 	//Key setting
 	FPerm(StateIn, StateOut);
-	memcpy(key, StateOut, CRYPTO_KEYBYTES);
+	memcpy(key, StateOut, key_bytes);
 	(*((unsigned*)StateIn))++;
 
 	//Nonce setting
 	FPerm(StateIn, StateOut);
-	memcpy(nonce, StateOut, CRYPTO_NPUBBYTES);
+	memcpy(nonce, StateOut, nonce_bytes);
 	(*((unsigned*)StateIn))++;
 
 	//Ciphertext memory allocation
-	ciphertext = (unsigned char*)malloc((size_t)(plaintext_length + CRYPTO_ABYTES));
+	ciphertext = (unsigned char*)malloc((size_t)(plaintext_length + tag_bytes));
 	if (ciphertext == NULL)
 	{
 		free(plaintext);

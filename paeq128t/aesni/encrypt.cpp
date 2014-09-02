@@ -1,4 +1,5 @@
-/* PAEQ-128: optimized (AES-NI) version*/
+/* PAEQ128t: optimized (AES-NI) version*/
+
 
 #ifndef NO_SUPERCOP
 #include "crypto_aead.h"
@@ -34,9 +35,9 @@
 using namespace std;
 
 //This is the implementation of PPAE instantiated with AESQ permutation
-const int key_bytes = CRYPTO_KEYBYTES;
-const int nonce_bytes = CRYPTO_NPUBBYTES;
-const int tag_bytes = CRYPTO_ABYTES;
+int key_bytes = CRYPTO_KEYBYTES;
+int nonce_bytes = CRYPTO_NPUBBYTES;
+int tag_bytes = CRYPTO_ABYTES;
 
 //AES S-box
 const static unsigned char sbox[256] = {

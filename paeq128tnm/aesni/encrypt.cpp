@@ -1,4 +1,5 @@
-/* PAEQ-128: optimized (AES-NI) version*/
+/* PAEQ128tnm: optimized (AES-NI) version*/
+
 
 #ifndef NO_SUPERCOP
 #include "crypto_aead.h"
@@ -24,19 +25,18 @@
 
 #define CRYPTO_MBLOCK (64-D_BYTES-CRYPTO_KEYBYTES)  //46 for 16-byte key
 #define CRYPTO_ADBLOCK (64-D_BYTES-2*CRYPTO_KEYBYTES) //30 for 16-byte key
-#define CRYPTO_COUNTERBYTES (64-D_BYTES-CRYPTO_KEYBYTES-CRYPTO_NPUBBYTES)  //34 for 16-byte key and 12-byte nonce
+#define CRYPTO_COUNTERBYTES (64-D_BYTES-CRYPTO_KEYBYTES-CRYPTO_NPUBBYTES)  //14 for 16-byte key and 32-byte nonce
 #define CRYPTO_LENGTH 12 //Maximal length of plaintext/AD length
 
 #define AES_GROUP_ROUNDS 2
 #define AES_GROUPS 10
-//#define EXTRANONCE
 
 using namespace std;
 
 //This is the implementation of PPAE instantiated with AESQ permutation
-const int key_bytes = CRYPTO_KEYBYTES;
-const int nonce_bytes = CRYPTO_NPUBBYTES;
-const int tag_bytes = CRYPTO_ABYTES;
+int key_bytes = CRYPTO_KEYBYTES;
+int nonce_bytes = CRYPTO_NPUBBYTES;
+int tag_bytes = CRYPTO_ABYTES;
 
 //AES S-box
 const static unsigned char sbox[256] = {
@@ -359,12 +359,14 @@ int PAEQ128_opt_AESNI_decrypt(unsigned char *m, unsigned long long *mlen,
 
 	//1.3 Setting first block
 	BlockInput[0] = D0;  //Domain separation constant
-	uint64_t nonce_low = (*((uint64_t*)npub)) << 32;
-	uint64_t nonce_high = *((uint64_t*)(npub + 4));
-	BlockInput[2] = _mm_set_epi64x(nonce_high, nonce_low);   //Nonce
+
+	//1.3.2 Nonce
+	BlockInput[1] = _mm_set_epi64x(*((uint64_t*)(npub + 8)), (*((uint64_t*)npub)));
+	BlockInput[2] = _mm_set_epi64x(*((uint64_t*)(npub + 24)), (*((uint64_t*)(npub + 16))));
+
+	//1.3.3 Key
 	__m128i Key = _mm_set_epi64x(*((uint64_t*)(k + 8)), (*((uint64_t*)k)));
 	BlockInput[3] = Key;
-
 
 	unsigned long long decrypted_bytes = 0;//Encrypted bytes counter
 
@@ -738,14 +740,13 @@ int PAEQ128_opt_AESNI_encrypt(
 	memset(BlockMiddle, 0, 64);
 	memset(BlockMiddle, 0, 64);
 
-	//1.3 Setting first block: Constant (bytes 0-1) || Counter (bytes 2-35) || Nonce (bytes 36-47) || Key (bytes 48-63)
+	//1.3 Setting first block: Constant (bytes 0-1) || Counter (bytes 2-15) || Nonce (bytes 16-47) || Key (bytes 48-63)
 	//1.3.1 Domain separation
 	BlockInput[0] = D0;  //Domain separation constant
 
 	//1.3.2 Nonce
-	uint64_t nonce_low = (*((uint64_t*)npub)) << 32;
-	uint64_t nonce_high = *((uint64_t*)(npub + 4));
-	BlockInput[2] = _mm_set_epi64x(nonce_high, nonce_low);   
+	BlockInput[1] = _mm_set_epi64x(*((uint64_t*)(npub + 8)), (*((uint64_t*)npub)));
+	BlockInput[2] = _mm_set_epi64x(*((uint64_t*)(npub + 24)), (*((uint64_t*)(npub + 16))));
 
 	//1.3.3 Key
 	__m128i Key = _mm_set_epi64x(*((uint64_t*)(k + 8)), (*((uint64_t*)k)));
