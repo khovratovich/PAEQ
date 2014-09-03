@@ -149,7 +149,8 @@ int genKAT(unsigned long long plaintext_length, unsigned long long ad_length)
 	for (unsigned i = 0; i<nonce_bytes; ++i)
 		fprintf(fp, "0x%.02x ", nonce[i]);
 	fprintf(fp, ".\n");
-	printf("Decryption result: %d\n", result);
+	if (result != 0)
+		printf("Decryption result: %d\n", result);
 
 
 	fprintf(fp, "\nCIPHERTEXT (%llu bytes):\n", ciphertext_length);
@@ -285,8 +286,8 @@ int benchmark(unsigned long long plaintext_length, unsigned long long ad_length)
 
 	if (decrypted_length != plaintext_length)
 		printf("Plaintext length mismatch\n");
-
-	printf("Decryption result: %d\n", result);
+	if (result!=0)
+		printf("Decryption result: %d\n", result);
 
 	free(ciphertext);
 	free(plaintext_decrypted);
@@ -298,10 +299,10 @@ int benchmark(unsigned long long plaintext_length, unsigned long long ad_length)
 
 int main(int argc, char* argv[])
 {
-	for (unsigned p_length = 0; p_length < 200; p_length+=4)
+	for (unsigned p_length = 0; p_length < 400; p_length+=40)
 	{
-
-		for (unsigned ad_length = 0; ad_length < 200; ad_length+=4)
+		printf("plaintext length %d\n", p_length);
+		for (unsigned ad_length = 0; ad_length < 200; ad_length+=40)
 			genKAT(p_length, ad_length);
 	}
 	/*for (unsigned i = 0; i < 10; ++i)
