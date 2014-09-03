@@ -299,6 +299,7 @@ int benchmark(unsigned long long plaintext_length, unsigned long long ad_length)
 
 int main(int argc, char* argv[])
 {
+	remove("kat.log");
 	for (unsigned p_length = 0; p_length < 400; p_length+=40)
 	{
 		printf("plaintext length %d\n", p_length);

@@ -1,6 +1,10 @@
 /* PAEQ-128: reference  version*/
 
+#ifndef NO_SUPERCOP
+#include "crypto_aead.h"
+#endif
 #include "api.h"
+
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,7 +24,9 @@
 //#define EXTRANONCE
 
   //This is the implementation of PPAE instantiated with AESQ permutation
-
+int key_bytes = CRYPTO_KEYBYTES;
+int nonce_bytes = CRYPTO_NPUBBYTES;
+int tag_bytes = CRYPTO_ABYTES;
 
 //AES S-box
 const static unsigned char sbox[256] =   {
@@ -581,10 +587,10 @@ int PAEQ128_ref_encrypt(
 		 //Here we do decryption and/or authentication so we need a key and a plaintext pointer valid
 		 if( (k==NULL) || (m==NULL) )
 			 return -2;
-
-		 /*//Minimum tag length verification
-		 if(clen < CRYPTO_ABYTES)
-			 return -5;*/
+		 
+		 //Minimum tag length verification
+		 if (clen < CRYPTO_ABYTES)
+			 return -1;
 
 		 //Initializing constants
 		unsigned char D0[2];

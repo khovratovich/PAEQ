@@ -123,65 +123,6 @@ void FPerm(const unsigned char* input, unsigned char* output)//AESQ permutation
 
 }
 
-/*
-void FPermAsm(const unsigned char* input, unsigned char* output)//AESQ permutation
-{
-
-	//Round Key initialization
-	__m128i roundkey0,roundkey1,roundkey2,roundkey3, roundkeyUpdateConstant;
-	roundkey0.m128i_i64[0] = roundkey0.m128i_i64[1] = 0x0000000100000001;
-	roundkey1.m128i_i64[0] = roundkey1.m128i_i64[1] = 0x0000000200000002;
-	roundkey2.m128i_i64[0] = roundkey2.m128i_i64[1] = 0x0000000300000003;
-	roundkey3.m128i_i64[0] = roundkey3.m128i_i64[1] = 0x0000000400000004;
-	roundkeyUpdateConstant.m128i_i64[0] = roundkeyUpdateConstant.m128i_i64[1] = 0x0000000400000004;
-
-	__m128i acc0,acc1,acc2,acc3,mixTmp;
-	for(unsigned i=0; i<16; ++i)
-	{
-		acc0.m128i_i8[i] = input[i];
-		acc1.m128i_i8[i] = input[i+16];
-		acc2.m128i_i8[i] = input[i+32];
-		acc3.m128i_i8[i] = input[i+48];
-	}
-	
-
-	for(unsigned i=0; i<AES_GROUPS; ++i)
-	{
-		for(unsigned j=0; j<AES_GROUP_ROUNDS; ++j)
-		{
-			//SubRounds
-			acc0 = _mm_aesenc_si128(acc0, roundkey0);
-			acc1 = _mm_aesenc_si128(acc1, roundkey1);
-			acc2 = _mm_aesenc_si128(acc2, roundkey2);
-			acc3 = _mm_aesenc_si128(acc3, roundkey3);
-
-			//Update Constant
-			roundkey0 = _mm_add_epi64(roundkeyUpdateConstant,roundkey0);
-			roundkey1 = _mm_add_epi64(roundkeyUpdateConstant,roundkey1);
-			roundkey2 = _mm_add_epi64(roundkeyUpdateConstant,roundkey2);
-			roundkey3 = _mm_add_epi64(roundkeyUpdateConstant,roundkey3);
-
-
-		}
-		//Mixing
-		mixTmp = _mm_unpackhi_epi32(acc1,acc0);//INV
-		acc0 = _mm_unpacklo_epi32(acc1,acc0);//INV
-		acc1 = _mm_unpackhi_epi32(acc3,acc2);//INV
-		acc2 = _mm_unpacklo_epi32(acc3,acc2);//INV
-		acc3 = _mm_unpackhi_epi32(acc2,acc0);//INV
-		acc0 = _mm_unpacklo_epi32(acc2,acc0);//INV
-		acc2 = _mm_unpacklo_epi32(mixTmp,acc1);//INV
-		acc1 = _mm_unpackhi_epi32(mixTmp,acc1);//INV
-	}
-	for(unsigned i=0; i<16; ++i)
-	{
-		output[i] = acc0.m128i_i8[i];
-		output[i+16] = acc1.m128i_i8[i];
-		output[i+32] = acc2.m128i_i8[i];
-		output[i+48] = acc3.m128i_i8[i];
-	}
-}
-*/
 //GF(256) multiplication
 
 unsigned char gmul_o(unsigned char a, unsigned char b) {
@@ -849,9 +790,9 @@ int crypto_aead_encrypt_no_nonce(
 		 if( (k==NULL) || (m==NULL) )
 			 return -2;
 
-		 /*//Minimum tag length verification
-		 if(clen < CRYPTO_ABYTES)
-			 return -5;*/
+		 //Minimum tag length verification
+		 if (clen < CRYPTO_ABYTES)
+			 return -1;
 
 		 //Initializing constants
 		unsigned char D0[2];

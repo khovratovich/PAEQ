@@ -848,9 +848,9 @@ int crypto_aead_encrypt_no_nonce(
 		 if( (k==NULL) || (m==NULL) )
 			 return -2;
 
-		 /*//Minimum tag length verification
-		 if(clen < CRYPTO_ABYTES)
-			 return -5;*/
+		 //Minimum tag length verification
+		 if (clen < CRYPTO_ABYTES)
+			 return -1;
 
 		 //Initializing constants
 		unsigned char D0[2];

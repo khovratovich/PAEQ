@@ -319,6 +319,9 @@ int PAEQ64_opt_AESNI_decrypt(unsigned char *m, unsigned long long *mlen,
 
 	(*mlen) = 0;
 
+	//Minimum tag length verification
+	if (clen < CRYPTO_ABYTES)
+		return -1;
 
 	//Here we do decryption and/or authentication so we need a key and a ciphertext pointer valid
 	if ((k == NULL) || (c == NULL))

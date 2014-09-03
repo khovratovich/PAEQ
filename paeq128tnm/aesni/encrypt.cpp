@@ -319,7 +319,9 @@ int PAEQ128_opt_AESNI_decrypt(unsigned char *m, unsigned long long *mlen,
 	}
 
 	(*mlen) = 0;
-
+	//Minimum tag length verification
+	if (clen < CRYPTO_ABYTES)
+		return -1;
 
 	//Here we do decryption and/or authentication so we need a key and a ciphertext pointer valid
 	if ((k == NULL) || (c == NULL))
@@ -672,14 +674,17 @@ int PAEQ128_opt_AESNI_decrypt(unsigned char *m, unsigned long long *mlen,
 	}
 	Key = _mm_xor_si128(Key, Key);
 
-	//4. Checking tag
-	__m128i ciphertext_tag = _mm_loadu_si128((__m128i*)(c + (*mlen)));
-	ciphertext_tag = _mm_xor_si128(ciphertext_tag, Tag[0]);
-	uint32_t* test = (uint32_t*)(&ciphertext_tag);
+	// 4. Checking tag
+	for (unsigned i = 0; i < 4; ++i)
+	{
+		__m128i ciphertext_tag = _mm_loadu_si128((__m128i*)(c + (*mlen) + sizeof(__m128i)*i));
+		ciphertext_tag = _mm_xor_si128(ciphertext_tag, Tag[i]);
+		uint32_t* test = (uint32_t*)(&ciphertext_tag);
 
-	if ((test[0] == 0) && (test[1] == 0) && (test[2] == 0) && (test[3] == 0))
-		return 0;
-	else return -1;
+		if ((test[0] != 0) || (test[1] != 0) || (test[2] != 0) || (test[3] != 0))
+			return -1;
+	}
+	return 0;
 }
 
 
