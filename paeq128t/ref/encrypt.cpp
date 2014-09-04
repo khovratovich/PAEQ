@@ -373,7 +373,7 @@ int crypto_aead_encrypt(
 
 				 for(unsigned i=0; i<64-2-CRYPTO_KEYBYTES; ++i)//Adding the output to Z
 				 {
-					 BlockLastInput[i+2] ^= BlockOutput[i];
+					 BlockLastInput[i+2] ^= BlockOutput[i+2];
 				 }
 
 				//Counters increment
@@ -617,7 +617,7 @@ int crypto_aead_encrypt(
 
 				 for(unsigned i=0; i<64-2-CRYPTO_KEYBYTES; ++i)//Adding the output to Z
 				 {
-					 BlockLastInput[i+2] ^= BlockOutput[i];
+					 BlockLastInput[i+2] ^= BlockOutput[i+2];
 				 }
 
 				//Counters increment

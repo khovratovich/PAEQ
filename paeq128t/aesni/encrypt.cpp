@@ -25,7 +25,7 @@
 
 #define CRYPTO_MBLOCK (64-D_BYTES-CRYPTO_KEYBYTES)  //46 for 16-byte key
 #define CRYPTO_ADBLOCK (64-D_BYTES-2*CRYPTO_KEYBYTES) //30 for 16-byte key
-#define CRYPTO_COUNTERBYTES (64-D_BYTES-CRYPTO_KEYBYTES-CRYPTO_NPUBBYTES)  //34 for 16-byte key and 12-byte nonce
+#define CRYPTO_COUNTERBYTES (64-D_BYTES-CRYPTO_KEYBYTES-CRYPTO_NPUBBYTES)  //30 for 16-byte key and 16-byte nonce
 #define CRYPTO_LENGTH 12 //Maximal length of plaintext/AD length
 
 #define AES_GROUP_ROUNDS 2
@@ -362,9 +362,7 @@ int PAEQ128_opt_AESNI_decrypt(unsigned char *m, unsigned long long *mlen,
 
 	//1.3 Setting first block
 	BlockInput[0] = D0;  //Domain separation constant
-	uint64_t nonce_low = (*((uint64_t*)npub)) << 32;
-	uint64_t nonce_high = *((uint64_t*)(npub + 4));
-	BlockInput[2] = _mm_set_epi64x(nonce_high, nonce_low);   //Nonce
+	BlockInput[2] = _mm_set_epi64x(*((uint64_t*)(npub + 8)), (*((uint64_t*)npub)));
 	__m128i Key = _mm_set_epi64x(*((uint64_t*)(k + 8)), (*((uint64_t*)k)));
 	BlockInput[3] = Key;
 
@@ -749,9 +747,7 @@ int PAEQ128_opt_AESNI_encrypt(
 	BlockInput[0] = D0;  //Domain separation constant
 
 	//1.3.2 Nonce
-	uint64_t nonce_low = (*((uint64_t*)npub)) << 32;
-	uint64_t nonce_high = *((uint64_t*)(npub + 4));
-	BlockInput[2] = _mm_set_epi64x(nonce_high, nonce_low);   
+	BlockInput[2] = _mm_set_epi64x(*((uint64_t*)(npub + 8)), (*((uint64_t*)npub)));
 
 	//1.3.3 Key
 	__m128i Key = _mm_set_epi64x(*((uint64_t*)(k + 8)), (*((uint64_t*)k)));
