@@ -1,3 +1,5 @@
+//#define EXTRANONCE
+
 #include "paeq-def.h"
 #ifndef NO_SUPERCOP
 #include "crypto_aead.h"

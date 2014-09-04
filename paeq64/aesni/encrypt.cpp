@@ -530,11 +530,12 @@ int PAEQ64_opt_AESNI_decrypt(unsigned char *m, unsigned long long *mlen,
 				BlockLastInput[2] = _mm_xor_si128(BlockOutput[2], BlockLastInput[2]);
 				BlockOutput[3] = _mm_and_si128(BlockOutput[3], lastinput_mask);
 				BlockLastInput[3] = _mm_xor_si128(BlockOutput[3], BlockLastInput[3]);
+
 				BlockLastInput[0] = _mm_xor_si128(BlockExtraOutput[0], BlockLastInput[0]);
 				BlockLastInput[1] = _mm_xor_si128(BlockExtraOutput[1], BlockLastInput[1]);
 				BlockLastInput[2] = _mm_xor_si128(BlockExtraOutput[2], BlockLastInput[2]);
 				BlockExtraOutput[3] = _mm_and_si128(BlockExtraOutput[3], lastinput_mask);
-				BlockLastInput[3] = _mm_xor_si128(BlockOutput[3], BlockLastInput[3]);
+				BlockLastInput[3] = _mm_xor_si128(BlockExtraOutput[3], BlockLastInput[3]);
 
 
 				//9.Counter update
@@ -575,7 +576,7 @@ int PAEQ64_opt_AESNI_decrypt(unsigned char *m, unsigned long long *mlen,
 		unsigned long long adblock_counter = 1;   //AD block counter
 		unsigned long long auth_bytes = 0;
 
-		//Preparing the block
+		//Preparing the block: Constant (bytes 0-1) || Counter (bytes 2-9) || Data (bytes 10-55) || Key (bytes 56-63)
 		BlockInput[0] = _mm_add_epi64(D0, four128);
 		BlockInput[3] = Key;
 		while (adlen>0)
@@ -590,6 +591,7 @@ int PAEQ64_opt_AESNI_decrypt(unsigned char *m, unsigned long long *mlen,
 
 				//2. Counter
 				BlockInput[0] = _mm_add_epi64(BlockInput[0], counter_one128);
+				BlockInput[0] = _mm_and_si128(BlockInput[0], counterD_mask); //Zeroing bytes for AD
 
 				//3. AD block
 
@@ -613,6 +615,8 @@ int PAEQ64_opt_AESNI_decrypt(unsigned char *m, unsigned long long *mlen,
 				BlockInput[0] = _mm_add_epi64(BlockInput[0], first_adblock);
 				BlockInput[1] = _mm_set_epi64x(ad_buffer[2], ad_buffer[1]);
 				BlockInput[2] = _mm_set_epi64x(ad_buffer[4], ad_buffer[3]);
+
+				BlockInput[3] = _mm_and_si128(BlockInput[3], key_mask);
 				BlockInput[3] = _mm_add_epi64(BlockInput[3], last_adblock);
 
 
@@ -650,14 +654,14 @@ int PAEQ64_opt_AESNI_decrypt(unsigned char *m, unsigned long long *mlen,
 				BlockInput[0] = _mm_and_si128(BlockInput[0], counterD_mask);  //Clearing upper 6 bytes 
 
 				BlockExtraInput[3] = BlockInput[3]; //Key is constant
-				BlockExtraInput[3] = _mm_and_si128(BlockExtraInput[3], lastinput_mask);
-				BlockInput[3] = _mm_and_si128(BlockInput[3], lastinput_mask);
+				BlockExtraInput[3] = _mm_and_si128(BlockExtraInput[3], key_mask);
+				BlockInput[3] = _mm_and_si128(BlockInput[3], key_mask);
 
 				//2. Loading AD
-				__m128i first_adblock = _mm_loadu_si128((__m128i*)(ad + auth_bytes - 10)); //Loading 16 bytes of AD
+				__m128i first_adblock = _mm_loadu_si128((__m128i*)(ad + auth_bytes)); //Loading 16 bytes of AD
 				first_adblock = _mm_slli_si128(first_adblock, 10);	//Keeping only 6 bytes of AD 
 				BlockExtraInput[0] = _mm_xor_si128(BlockExtraInput[0], first_adblock);  //Loading 6 bytes of AD
-				first_adblock = _mm_loadu_si128((__m128i*)(ad + auth_bytes - 10 + CRYPTO_ADBLOCK)); //Loading 16 bytes of AD
+				first_adblock = _mm_loadu_si128((__m128i*)(ad + auth_bytes+CRYPTO_ADBLOCK)); //Loading 16 bytes of AD
 				first_adblock = _mm_slli_si128(first_adblock, 10);	//Keeping only 6 bytes of AD 
 				BlockInput[0] = _mm_xor_si128(BlockInput[0], first_adblock);  //Loading 6 bytes of AD
 
@@ -696,7 +700,7 @@ int PAEQ64_opt_AESNI_decrypt(unsigned char *m, unsigned long long *mlen,
 	}//end of AD part
 
 	// Tag production 
-	BlockLastInput[3] = _mm_and_si128(BlockLastInput[3], key_mask);
+	BlockLastInput[3] = _mm_and_si128(BlockLastInput[3], lastinput_mask);
 	BlockLastInput[3] = _mm_xor_si128(BlockLastInput[3], Key);
 	BlockLastInput[0] = _mm_and_si128(BlockLastInput[0], Dmask); //Clearing first two bytes
 	BlockLastInput[0] = _mm_add_epi64(BlockLastInput[0], six128);
@@ -954,11 +958,12 @@ int PAEQ64_opt_AESNI_encrypt(
 				BlockLastInput[2] = _mm_xor_si128(BlockOutput[2], BlockLastInput[2]);
 				BlockOutput[3] = _mm_and_si128(BlockOutput[3],lastinput_mask);
 				BlockLastInput[3] = _mm_xor_si128(BlockOutput[3], BlockLastInput[3]);
+
 				BlockLastInput[0] = _mm_xor_si128(BlockExtraOutput[0], BlockLastInput[0]);
 				BlockLastInput[1] = _mm_xor_si128(BlockExtraOutput[1], BlockLastInput[1]);
 				BlockLastInput[2] = _mm_xor_si128(BlockExtraOutput[2], BlockLastInput[2]);
 				BlockExtraOutput[3] = _mm_and_si128(BlockExtraOutput[3],lastinput_mask);
-				BlockLastInput[3] = _mm_xor_si128(BlockOutput[3], BlockLastInput[3]);
+				BlockLastInput[3] = _mm_xor_si128(BlockExtraOutput[3], BlockLastInput[3]);
 
 
 				//9.Counter update
@@ -1014,6 +1019,7 @@ int PAEQ64_opt_AESNI_encrypt(
 
 				//2. Counter
 				BlockInput[0] = _mm_add_epi64(BlockInput[0], counter_one128);
+				BlockInput[0] = _mm_and_si128(BlockInput[0], counterD_mask); //Zeroing bytes for AD
 
 				//3. AD block
 
@@ -1037,6 +1043,8 @@ int PAEQ64_opt_AESNI_encrypt(
 				BlockInput[0] = _mm_add_epi64(BlockInput[0], first_adblock);
 				BlockInput[1] = _mm_set_epi64x(ad_buffer[2], ad_buffer[1]);
 				BlockInput[2] = _mm_set_epi64x(ad_buffer[4], ad_buffer[3]);
+
+				BlockInput[3] = _mm_and_si128(BlockInput[3], key_mask);
 				BlockInput[3] = _mm_add_epi64(BlockInput[3], last_adblock);
 
 
@@ -1074,14 +1082,14 @@ int PAEQ64_opt_AESNI_encrypt(
 				BlockInput[0] = _mm_and_si128(BlockInput[0], counterD_mask);  //Clearing upper 6 bytes 
 				
 				BlockExtraInput[3] = BlockInput[3]; //Key is constant
-				BlockExtraInput[3] = _mm_and_si128(BlockExtraInput[3], lastinput_mask);
-				BlockInput[3] = _mm_and_si128(BlockInput[3], lastinput_mask);
+				BlockExtraInput[3] = _mm_and_si128(BlockExtraInput[3], key_mask);
+				BlockInput[3] = _mm_and_si128(BlockInput[3], key_mask);
 
 				//2. Loading AD
-				__m128i first_adblock = _mm_loadu_si128((__m128i*)(ad + auth_bytes - 10)); //Loading 16 bytes of AD
+				__m128i first_adblock = _mm_loadu_si128((__m128i*)(ad + auth_bytes)); //Loading 16 bytes of AD
 				first_adblock = _mm_slli_si128(first_adblock, 10);	//Keeping only 6 bytes of AD 
 				BlockExtraInput[0] = _mm_xor_si128(BlockExtraInput[0], first_adblock);  //Loading 6 bytes of AD
-				first_adblock = _mm_loadu_si128((__m128i*)(ad + auth_bytes - 10+CRYPTO_ADBLOCK)); //Loading 16 bytes of AD
+				first_adblock = _mm_loadu_si128((__m128i*)(ad + auth_bytes+CRYPTO_ADBLOCK)); //Loading 16 bytes of AD
 				first_adblock = _mm_slli_si128(first_adblock, 10);	//Keeping only 6 bytes of AD 
 				BlockInput[0] = _mm_xor_si128(BlockInput[0], first_adblock);  //Loading 6 bytes of AD
 
@@ -1120,7 +1128,7 @@ int PAEQ64_opt_AESNI_encrypt(
 	}//end of AD part
 
 	// Tag production 
-	BlockLastInput[3] = _mm_and_si128(BlockLastInput[3], key_mask);
+	BlockLastInput[3] = _mm_and_si128(BlockLastInput[3], lastinput_mask);
 	BlockLastInput[3] = _mm_xor_si128(BlockLastInput[3],Key);
 	BlockLastInput[0] = _mm_and_si128(BlockLastInput[0], not_Dmask); //Clearing first two bytes
 	BlockLastInput[0] = _mm_add_epi64(BlockLastInput[0], six128);
