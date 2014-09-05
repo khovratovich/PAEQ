@@ -591,17 +591,19 @@ int crypto_aead_encrypt_no_nonce(
 
 		 if(clen==NULL)
 			 return -1;
-		 if((mlen==0) && (adlen==0))
-		 {
-			 *clen=0;
-			 return 0;
-		 }
+		 
 
 		 //Assume that we do encryption and/or authentication so we need a key and a ciphertext pointer valid
 		 if( (k==NULL) || (c==NULL) )
 			 return -2;
 
 		GenerateNonce(npub,m,mlen,ad,adlen,k);
+
+		if ((mlen == 0) && (adlen == 0))
+		{
+			*clen = 0;
+			return 0;
+		}
 
 		 //Initializing constants
 		unsigned char D0[2];

@@ -1,4 +1,4 @@
-//#define EXTRANONCE
+#define EXTRANONCE
 
 #include "paeq-def.h"
 #ifndef NO_SUPERCOP

@@ -1,6 +1,4 @@
 /* PAEQ128tnm: optimized (AES-NI) version*/
-
-
 #ifndef NO_SUPERCOP
 #include "crypto_aead.h"
 #endif
@@ -9,6 +7,7 @@
 #include <stdio.h>
 #include "stdint.h"
 #include <cstring>
+#include <algorithm>
 #include <stdlib.h>
 #include "string.h"
 #include "wmmintrin.h"
@@ -328,7 +327,7 @@ int PAEQ128_opt_AESNI_decrypt(unsigned char *m, unsigned long long *mlen,
 		return -2;
 
 	//1.1 Initializing constants
-	uint64_t D_left = ((uint64_t)CRYPTO_NPUBBYTES * 8) + (((uint64_t)CRYPTO_KEYBYTES * 8) << 8);
+	uint64_t D_left = (((uint64_t)CRYPTO_NPUBBYTES * 8) % 256) + (((uint64_t)CRYPTO_KEYBYTES * 8) << 8);
 	__m128i D0 = _mm_set_epi64x(0, D_left);
 	__m128i D2 = _mm_set_epi64x(0, D_left + 2);
 	__m128i D3 = _mm_set_epi64x(0, D_left + 3);
@@ -688,6 +687,8 @@ int PAEQ128_opt_AESNI_decrypt(unsigned char *m, unsigned long long *mlen,
 }
 
 
+
+
 int PAEQ128_opt_AESNI_encrypt(
 	unsigned char *c, unsigned long long *clen,
 	const unsigned char *m, unsigned long long mlen,
@@ -714,7 +715,7 @@ int PAEQ128_opt_AESNI_encrypt(
 		return -7;
 
 	//1.1 Initializing constants
-	uint64_t D_left = ((uint64_t)CRYPTO_NPUBBYTES * 8) + (((uint64_t)CRYPTO_KEYBYTES * 8) << 8);
+	uint64_t D_left = (((uint64_t)CRYPTO_NPUBBYTES * 8) % 256) + (((uint64_t)CRYPTO_KEYBYTES * 8) << 8);
 	__m128i D0 = _mm_set_epi64x(0, D_left);
 	__m128i D2 = _mm_set_epi64x(0, D_left + 2);
 	__m128i one128 = _mm_set_epi64x(0, 1);
@@ -1082,6 +1083,9 @@ int crypto_aead_encrypt(
 
 
 
+
+
+
 int crypto_aead_decrypt(
 	unsigned char *m, unsigned long long *mlen,
 	unsigned char *nsec,
@@ -1094,3 +1098,198 @@ int crypto_aead_decrypt(
 	return PAEQ128_opt_AESNI_decrypt(m, mlen, c, clen, ad, adlen, npub, k);
 }
 
+
+
+
+
+int GenerateNonceOpt(unsigned char* output, const unsigned char *m, unsigned long long mlen,
+	const unsigned char *ad, unsigned long long adlen,
+	const unsigned char *k)
+	//Generate a nonce as a hash of the plaintext & AD by the AESQ-sponge function
+{
+	//Does not work for keys longer than 192 bits
+	if (CRYPTO_KEYBYTES >24)
+	{
+		memset(output, 0, CRYPTO_NPUBBYTES);
+		return -1;
+	}
+
+	__m128i State[4];  //sponge internal state
+	__m128i StateOut[4];  //sponge internal state
+	State[0] = State[1] = State[2] = State[3] = _mm_set_epi64x(0, 0);
+
+	__m128i Injection[2]; //We inject into the first 32 bytes
+
+
+	//Plaintext length -- 12 bytes and AD length - 12 bytes
+	Injection[0] = _mm_set_epi64x(adlen << (CRYPTO_LENGTH*8-64), mlen);
+	Injection[1] = _mm_set_epi64x(0, adlen >> (CRYPTO_LENGTH * 8 - 64));
+
+
+	//Key and nonce length
+	__m128i tmp = _mm_set_epi64x(CRYPTO_KEYBYTES + (CRYPTO_NPUBBYTES << 8), 0);
+	Injection[1] = _mm_xor_si128(Injection[1], tmp);
+
+	//Add key
+	__m128i key = _mm_loadu_si128((__m128i*)k);
+	Injection[1] = _mm_xor_si128(Injection[1], _mm_slli_si128(key, 2*CRYPTO_LENGTH+2-16)); //6 key bytes inserted
+
+	//Iteration
+	State[0] = _mm_xor_si128(State[0], Injection[0]);
+	State[1] = _mm_xor_si128(State[1], Injection[1]);
+	FPermAsm(State, StateOut);
+
+
+	//Main loop
+	unsigned state_index = 0;
+	unsigned long long message_index = 0;
+	unsigned long long ad_index = 0;
+	unsigned char buf[32];
+
+	//Remaining key bytes
+	Injection[0] = _mm_srli_si128(key, CRYPTO_KEYBYTES - (2 * CRYPTO_LENGTH + 2 - 16));
+	key = _mm_xor_si128(key, key);
+	state_index = 2 * CRYPTO_LENGTH + 2 - 16;
+	State[0] = _mm_xor_si128(StateOut[0], Injection[0]);
+	State[1] = StateOut[1];
+	State[2] = StateOut[2];
+	State[3] = StateOut[3];
+
+	//Injecting plaintext
+	while (mlen >message_index) //we can load 32-byte chunks
+	{
+		if ((state_index == 0) && (mlen >= message_index + 32))
+		{
+			Injection[0] = _mm_loadu_si128((__m128i*)(m + message_index));
+			Injection[1] = _mm_loadu_si128((__m128i*)(m + message_index+16));
+			state_index = 32;
+			message_index += 32;
+		}
+		else
+		{
+			memset(buf, 0, 32);
+			if ((32 - state_index) <= (mlen - message_index))
+			{
+				memcpy(buf + state_index, m + message_index, 32 - state_index);
+				message_index += 32-state_index;
+				state_index = 32;
+
+			}
+			else
+			{
+				memcpy(buf + state_index, m + message_index, mlen - message_index);
+				state_index += mlen - message_index;
+				message_index = mlen;
+			}
+			Injection[0] = _mm_loadu_si128((__m128i*)buf);
+			Injection[1] = _mm_loadu_si128((__m128i*)(buf + 16));
+		}
+		State[0] = _mm_xor_si128(State[0], Injection[0]);
+		State[1] = _mm_xor_si128(State[1], Injection[1]);
+		if (state_index == 32)
+		{
+			FPermAsm(State, StateOut);
+			State[0] = StateOut[0];
+			State[1] = StateOut[1];
+			State[2] = StateOut[2];
+			State[3] = StateOut[3];
+			state_index = 0;
+		}
+	}//end of plaintext loading
+
+	//Injecting AD
+	while (adlen >ad_index) //we can load 32-byte chunks
+	{
+		if ((state_index == 0) && (adlen >= ad_index + 32))
+		{
+			Injection[0] = _mm_loadu_si128((__m128i*)(ad + ad_index));
+			Injection[1] = _mm_loadu_si128((__m128i*)(ad + ad_index + 16));
+			state_index = 32;
+			ad_index += 32;
+		}
+		else
+		{
+			memset(buf, 0, 32);
+			if ((32 - state_index) <= (adlen - ad_index))
+			{
+				memcpy(buf + state_index, ad + ad_index, 32 - state_index);
+				ad_index += 32 - state_index;
+				state_index = 32;
+			}
+			else
+			{
+				memcpy(buf + state_index, ad + ad_index, adlen - ad_index);
+				state_index += adlen - ad_index;
+				ad_index = adlen;
+			}
+			Injection[0] = _mm_loadu_si128((__m128i*)buf);
+			Injection[1] = _mm_loadu_si128((__m128i*)(buf + 16));
+		}
+		State[0] = _mm_xor_si128(State[0], Injection[0]);
+		State[1] = _mm_xor_si128(State[1], Injection[1]);
+		if (state_index == 32)
+		{
+			FPermAsm(State, StateOut);
+
+			State[0] = StateOut[0];
+			State[1] = StateOut[1];
+			State[2] = StateOut[2];
+			State[3] = StateOut[3];
+			state_index = 0;
+		}
+	}//end of AD loading
+
+	//Injecting padding
+	if (state_index < 31)
+	{
+		memset(buf, 0, 32);
+		buf[state_index] = 1;
+		buf[31] = 1;
+		Injection[0] = _mm_loadu_si128((__m128i*)(buf ));
+		Injection[1] = _mm_loadu_si128((__m128i*)(buf + 16)); 
+		State[0] = _mm_xor_si128(State[0], Injection[0]);
+		State[1] = _mm_xor_si128(State[1], Injection[1]);
+		FPermAsm(State, StateOut);
+
+		State[0] = StateOut[0];
+		State[1] = StateOut[1];
+		State[2] = StateOut[2];
+		State[3] = StateOut[3];
+	}
+	else
+	{
+		Injection[1] = _mm_set_epi32(1 << 31, 0, 0, 0);
+		State[1] = _mm_xor_si128(State[1], Injection[1]);
+		FPermAsm(State, StateOut);
+
+		State[0] = StateOut[0];
+		State[1] = StateOut[1];
+		State[2] = StateOut[2];
+		State[3] = StateOut[3];
+		State[1] = _mm_xor_si128(State[1], Injection[1]);
+		FPermAsm(State, StateOut);
+
+		State[0] = StateOut[0];
+		State[1] = StateOut[1];
+		State[2] = StateOut[2];
+		State[3] = StateOut[3];
+	}
+	memcpy(output, StateOut, 32);
+	return 0;
+
+}
+
+int crypto_aead_encrypt_no_nonce(
+	unsigned char *c, unsigned long long *clen,
+	const unsigned char *m, unsigned long long mlen,
+	const unsigned char *ad, unsigned long long adlen,
+	const unsigned char *nsec,
+	unsigned char *npub,
+	const unsigned char *k
+	)
+	//Generates nonce out of plaintext and AD and put it into npub
+
+{
+	GenerateNonceOpt(npub, m, mlen, ad, adlen, k);
+	return PAEQ128_opt_AESNI_encrypt(c, clen, m, mlen, ad, adlen, npub, k);
+}
