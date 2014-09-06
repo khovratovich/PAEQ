@@ -1,4 +1,4 @@
-#define EXTRANONCE
+//#define EXTRANONCE
 
 #include "paeq-def.h"
 #ifndef NO_SUPERCOP
@@ -304,7 +304,7 @@ int main(int argc, char* argv[])
 	for (unsigned p_length = 0; p_length < 400; p_length+=40)
 	{
 		printf("plaintext length %d\n", p_length);
-		for (unsigned ad_length = 0; ad_length < 200; ad_length+=40)
+		for (unsigned ad_length = 40; ad_length < 200; ad_length+=40)
 			genKAT(p_length, ad_length);
 	}
 	/*for (unsigned i = 0; i < 10; ++i)
