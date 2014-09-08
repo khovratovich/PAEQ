@@ -301,10 +301,10 @@ int benchmark(unsigned long long plaintext_length, unsigned long long ad_length)
 int main(int argc, char* argv[])
 {
 	remove("kat.log");
-	for (unsigned p_length = 0; p_length < 400; p_length+=40)
+	for (unsigned p_length = 0; p_length < 400; p_length+=20)
 	{
 		printf("plaintext length %d\n", p_length);
-		for (unsigned ad_length = 40; ad_length < 200; ad_length+=40)
+		for (unsigned ad_length = 0; ad_length < 200; ad_length+=20)
 			genKAT(p_length, ad_length);
 	}
 	/*for (unsigned i = 0; i < 10; ++i)
