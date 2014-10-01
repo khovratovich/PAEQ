@@ -104,8 +104,7 @@ int genKAT(unsigned long long plaintext_length, unsigned long long ad_length)
 	}
 
 	//Writing input
-	FILE *fp;
-	fopen_s(&fp, "kat.log", "a+");
+	FILE *fp=fopen("kat.log", "a+");
 	fprintf(fp, "\n\n===================================  Encrypting plaintext (%llu bytes) and AD (%llu bytes)=============\n", plaintext_length,
 		ad_length);
 	fprintf(fp, "PLAINTEXT (%llu bytes):\n", plaintext_length);
